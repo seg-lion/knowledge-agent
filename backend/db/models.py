@@ -28,6 +28,7 @@ class Chunk(Base):
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)  # 这是文档的第几块
     dense_embedding: Mapped[list[float]] = mapped_column(Vector(1024), nullable=True)
     metadata_: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    tsv: Mapped[str | None] = mapped_column(Text, nullable=True)  # tsvector 全文检索列
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     document: Mapped["Document"] = relationship(back_populates="chunks")
