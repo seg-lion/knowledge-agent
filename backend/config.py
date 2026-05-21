@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     interest_decay_days: int = 30
     interest_dormant_days: int = 90
     interest_auto_capture_threshold: int = 5
+    session_summary_trigger_rounds: int = 10
+
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
