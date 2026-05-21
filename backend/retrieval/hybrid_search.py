@@ -8,20 +8,22 @@ async def dense_search(query_embedding: list[float], top_k: int | None = None) -
     '''Dense 通路：pgvector 余弦相似度检索'''
     if top_k is None:
         top_k = settings.dense_top_k
-    
+
+
+    # 向量拼成 pgvector 常量格式
+    vec_str = "'[" + ",".join(map(str, query_embedding)) + "]'::vector"
+
+
     async with async_session() as session:  # 打开异步数据库连接
         result = await session.execute(
-            text(   #1 - (c.dense_embedding <=> :embedding) AS similarity 计算问题向量与库中向量的相似度
-                '''
+            text(f"""
                 SELECT c.id, c.content, c.document_id, c.chunk_index,
-                       1 - (c.dense_embedding <=> :embedding) AS similarity
+                       1 - (c.dense_embedding <=> {vec_str}) AS similarity
                 FROM chunks c
                 WHERE c.dense_embedding IS NOT NULL
-                ORDER BY c.dense_embedding <=> :embedding   
-                LIMIT :limit
-'''
-            ),
-            {"embedding": query_embedding, "limit": top_k}
+                ORDER BY c.dense_embedding <=> {vec_str}
+                LIMIT {top_k}
+            """)
         )
         rows = result.fetchall()
         #取出查到的所有行：[(id, content, document_id, chunk_index, similarity), ...]
@@ -44,21 +46,21 @@ async def sparse_search(query_text: str, top_k: int | None = None) -> list[dict]
     '''Sparse 通路: PostgreSQL tsvector 全文检索'''
     if top_k is None:
         top_k = settings.sparse_top_k
-        
+
+    escaped_query = query_text.replace("'", "''")
+
     async with async_session() as session:
         result = await session.execute(
-            text(   # plainto_tsquery('simple', :query) AS query 把用户问题切成关键词
-                """
-            SELECT c.id, c.content, c.document_id, c.chunk_index,
-                    ts_rank(c.tsv, query) AS rank
-            FROM chunks c,
-                    plainto_tsquery('simple', :query) AS query
-            WHERE c.tsv @@ query
-            ORDER BY rank DESC
-            LIMIT :limit
-"""
-            ),
-            {"query": query_text, "limit": top_k},
+            text(f"""
+                SELECT c.id, c.content, c.document_id, c.chunk_index,
+                       ts_rank(c.tsv::tsvector, query) AS rank
+                FROM chunks c,
+                     plainto_tsquery('simple', '{escaped_query}') AS query
+                WHERE c.tsv::tsvector @@ query
+                ORDER BY rank DESC
+                LIMIT {top_k}
+            """)
+
         )
         rows = result.fetchall()
 
