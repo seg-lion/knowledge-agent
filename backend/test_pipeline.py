@@ -8,7 +8,26 @@ async def main():
     await init_db()
     print("✅ 数据表已就绪")
 
-
+    docs = [
+    ("混合检索设计", """## RRF 融合算法
+Reciprocal Rank Fusion 是混合检索的标准做法。
+RRF 不需要归一化向量分数和 BM25 分数，只关心排名。
+k=60 是常见选择：k 越大越接近平均排名，k 越小越看重前几名。
+"""),
+    ("Prompt Cache 入门", """## 为什么需要 Prompt Caching
+LLM API 调用中，system prompt 和工具定义几乎每次都不变。
+把这些放到 prompt 最前面，API 提供商可以缓存这些前缀，
+后续请求只计算变化的尾部。Anthropic 的 cache 写贵读便宜。
+"""),
+    ("Python 性能优化", """## async/await 最佳实践
+异步函数用 asyncio.gather 并行执行独立 IO 操作。
+数据库连接使用连接池复用，不要每次查询都建新连接。
+uvicorn 配合 FastAPI 支持高并发异步请求处理。
+"""),
+]
+    for title, content in docs:
+        await load_document(title=title, content=content)
+    
     # 1. 加载一篇测试文档
     print("=" * 50)
     print("1. 加载测试文档...")

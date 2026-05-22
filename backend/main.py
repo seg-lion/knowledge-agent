@@ -1,20 +1,24 @@
+import json
+import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from db.database import init_db
+from core.orchestrator import Orchestrator
+
+# 全局单例 Orchestrator
+orchestrator = Orchestrator()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动时执行：建表
     await init_db()
     yield
-    # 关闭时执行（暂不需要）
 
 
 app = FastAPI(title="Knowledge Agent", version="0.1.0", lifespan=lifespan)
 
-# 允许前端跨域访问（Next.js 默认端口 3000）
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -27,3 +31,67 @@ app.add_middleware(
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "knowledge-agent"}
+
+
+@app.post("/chat")
+async def chat(request: Request):
+    """普通对话：用户消息 → 自动路由到合适的 Agent"""
+    body = await request.json()
+    message = body.get("message", "")
+
+    result = await orchestrator.route_and_execute(message)
+
+    return {
+        "agent": result["agent"],
+        "response": result["response"],
+        "tool_calls": result.get("tool_calls", []),
+        "session_id": result["session_id"],
+    }
+
+
+@app.post("/negotiate")
+async def negotiate(request: Request):
+    """多 Agent 协商：广播任务，Agent 通过 MessageBus 自主通信"""
+    body = await request.json()
+    task = body.get("task", "")
+
+    result = await orchestrator.negotiate(task)
+
+    return {
+        "task": result["task"],
+        "rounds": result["rounds"],
+        "message_history": result["message_history"],
+    }
+
+
+@app.get("/negotiate/stream")
+async def negotiate_stream(request: Request):
+    """多 Agent 协商的 SSE 实时流——前端能看 Agent 怎么聊天的"""
+    task = request.query_params.get("task", "请检索并回答关于 agent memory 的问题")
+
+    async def event_stream():
+        # 把消息推送到 SSE
+        queue = asyncio.Queue()
+
+        async def sse_listener(msg):
+            await queue.put(msg)
+
+        orchestrator.bus.add_listener(sse_listener)
+
+        # 后台跑协商
+        asyncio.create_task(orchestrator.negotiate(task))
+
+        # 把每条消息转成 SSE 格式推给前端
+        while True:
+            try:
+                msg = await asyncio.wait_for(queue.get(), timeout=30)
+                yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
+            except asyncio.TimeoutError:
+                yield f"data: {json.dumps({'status': 'done'})}\n\n"
+                break
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

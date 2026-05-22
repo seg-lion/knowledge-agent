@@ -1,0 +1,83 @@
+[
+  {
+    "query": "混合检索怎么融合两路结果",
+    "relevant_chunk_id": "1d9084b4-cd2f-4487-8130-1d8ef45025ca",
+    "intent": "精确查找"
+  },
+  {
+    "query": "RRF 是什么意思",
+    "relevant_chunk_id": "1d9084b4-cd2f-4487-8130-1d8ef45025ca",
+    "intent": "精确查找"
+  },
+  {
+    "query": "为什么需要 prompt caching",
+    "relevant_chunk_id": "0b724b09-63fd-45eb-bc2b-5841d8a29bc2",
+    "intent": "精确查找"
+  },
+  {
+    "query": "prompt 放在前面有什么好处",
+    "relevant_chunk_id": "0b724b09-63fd-45eb-bc2b-5841d8a29bc2",
+    "intent": "语义查找"
+  },
+  {
+    "query": "LLM API 调用怎么省钱",
+    "relevant_chunk_id": "0b724b09-63fd-45eb-bc2b-5841d8a29bc2",
+    "intent": "语义查找"
+  },
+  {
+    "query": "asyncio.gather 是干嘛的",
+    "relevant_chunk_id": "a43ba33b-f9e8-446f-9f39-8465eecf3546",
+    "intent": "精确查找"
+  },
+  {
+    "query": "Python 异步怎么做才能快",
+    "relevant_chunk_id": "a43ba33b-f9e8-446f-9f39-8465eecf3546",
+    "intent": "语义查找"
+  },
+  {
+    "query": "记忆系统怎么设计衰减",
+    "relevant_chunk_id": "85aecd64-c57f-4a98-85f1-c38ae555a922",
+    "intent": "语义查找"
+  },
+  {
+    "query": "艾宾浩斯遗忘曲线怎么用在 AI 里",
+    "relevant_chunk_id": "85aecd64-c57f-4a98-85f1-c38ae555a922",
+    "intent": "语义查找"
+  },
+  {
+    "query": "短期记忆和长期记忆的区别",
+    "relevant_chunk_id": "85aecd64-c57f-4a98-85f1-c38ae555a922",
+    "intent": "精确查找"
+  },
+  {
+    "query": "asyncpg 连接池怎么配置",
+    "relevant_chunk_id": "a43ba33b-f9e8-446f-9f39-8465eecf3546",
+    "intent": "语义查找"
+  },
+  {
+    "query": "RRF 的 k 值选多少好",
+    "relevant_chunk_id": "1d9084b4-cd2f-4487-8130-1d8ef45025ca",
+    "intent": "精确查找"
+  },
+  {
+    "query": "Anthropic 的缓存贵吗",
+    "relevant_chunk_id": "0b724b09-63fd-45eb-bc2b-5841d8a29bc2",
+    "intent": "语义查找"
+  },
+  {
+    "query": "uvicorn 和 FastAPI 怎么配合",
+    "relevant_chunk_id": "a43ba33b-f9e8-446f-9f39-8465eecf3546",
+    "intent": "语义查找"
+  },
+  {
+    "query": "React 怎么优化性能",
+    "relevant_chunk_id": null,
+    "intent": "否定查询"
+  },
+  {
+    "query": "那个让检索两路结果合并的算法叫什么来着",
+    "relevant_chunk_id": "1d9084b4-cd2f-4487-8130-1d8ef45025ca",
+    "intent": "边界模糊"
+  }
+  
+]

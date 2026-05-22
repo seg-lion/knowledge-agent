@@ -52,3 +52,32 @@ async def llm_call(system_prompt: str, user_message: str, provider: str = 'deeps
     else:
         raise ValueError(f"Unknown provider:{provider}")
 
+
+async def llm_chat(messages: list[dict], provider: str = "deepseek", model: str = "deepseek-chat") -> str:
+    """支持完整 messages 列表的 LLM 调用——多轮对话用这个"""
+    if provider in ("deepseek", "openai"):
+        client = _get_openai()
+        response = await client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.0,
+        )
+        return response.choices[0].message.content or ""
+
+    elif provider == "anthropic":
+        global anthropic_client
+        if anthropic_client is None:
+            anthropic_client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+        system_msg = next((m for m in messages if m["role"] == "system"), None)
+        user_msgs = [m for m in messages if m["role"] != "system"]
+        response = await anthropic_client.messages.create(
+            model=model,
+            max_tokens=2000,
+            system=system_msg["content"] if system_msg else "",
+            messages=user_msgs,
+        )
+        return response.content[0].text
+
+    raise ValueError(f"Unknown provider: {provider}")
+
+
