@@ -3,6 +3,7 @@ Agent的指挥中心----创建、注册到消息总线，协调协商回合
 '''
 
 import asyncio
+import hashlib
 from core.message_bus import MessageBus
 from agents.collector import CollectorAgent
 from agents.curator import CuratorAgent
@@ -32,128 +33,228 @@ class Orchestrator:
         self.editor.session = self.session
 
     async def route_and_execute(self, user_message: str) -> dict:
-        '''
-        用户消息入口，根据意图路由到合适的Agent
-        这是一个简化版--真正的多Agent 协商在后面扩展
-        '''
-
+        """用户消息入口——启动多 Agent 并发协商"""
         if self.session is None:
-            self.new_session('default')
-        
-        # 记录用户消息
+            self.new_session("default")
+
         self.session.add_message("user", user_message)
 
-        # 简单意图判断：包含”http“ -> Collector
-        if "http://" in user_message or "https://" in user_message:
-            result = await self.collector.think_and_act(user_message)
-            agent_used = "collector"
-        elif any(kw in user_message for kw in ["搜", "找", "查", "什么是", "怎么", "为什么", "?"]):
-            result = await self.editor.think_and_act(user_message)
-            agent_used = "editor"
-        else:
-            result = await self.editor.think_and_act(user_message)
-            agent_used = "editor"
-        
-        response_text = result.get("response", str(result))
+        # 每次新请求清空所有 Agent 的对话历史，防止上一轮内容污染
+        for agent in [self.collector, self.curator, self.librarian, self.editor]:
+            agent.conversation_history = []
+
+        result = await self._run_concurrent_negotiation(user_message)
+
+        response_text = result.get("final_answer", str(result))
+        agent_used = result.get("primary_agent", "editor")
+
         self.session.add_message(agent_used, response_text)
 
-        # 记录主题
         from memory.long_term import record_access, check_auto_capture
         for topic in self.session.get_top_topics(3):
             await record_access(topic)
             await check_auto_capture(topic)
-        
 
         return {
             "agent": agent_used,
             "response": response_text,
             "tool_calls": result.get("tool_calls", []),
-            "session_id": self.session.session_id
+            "session_id": self.session.session_id,
+        }
+
+    async def _run_concurrent_negotiation(self, user_message: str) -> dict:
+        """
+        并发多 Agent 协商：每个 Agent 收到任务后自主决定做什么、对谁说话。
+        通过 send_message 工具实现 Agent 间通信（结构化 JSON，不靠 @agent名）。
+        """
+        is_url = "http://" in user_message or "https://" in user_message
+
+        # 广播给所有 Agent，各自根据职责行动
+        if is_url:
+            hint = "@collector：抓取此URL并入库\n@curator：等Collector完成后评估内容质量\n@librarian：入库后检索相关内容\n@editor：准备综合回答"
+        else:
+            hint = "@librarian：检索相关内容并告知 @editor 和 @curator\n@editor：收到检索结果后综合回答用户\n@curator：记录本次检索的主题\n@collector：如果与抓取无关可忽略"
+        await self.bus.broadcast("orchestrator", "proposal",
+            f"用户消息：{user_message}\n\n各Agent职责提醒：\n{hint}",
+            round_num=0)
+        primary = "collector" if is_url else "editor"
+
+        final_answer = None
+        tool_calls_log = []
+        seen = set()
+        rounds = 0
+        max_rounds = 5  # 足够一次完整的来回协商（问→答→追问→再答→确认）
+        agent_map = {
+            "librarian": self.librarian, "editor": self.editor,
+            "curator": self.curator, "collector": self.collector,
+        }
+
+        max_rounds = 20
+        quiet_rounds = 0
+        max_quiet = 8  # 等 24 秒（8×3s）给 fetch_url 等慢操作留时间
+
+        while rounds < max_rounds and quiet_rounds < max_quiet:
+            rounds += 1
+
+            # 收集本轮所有未处理的消息
+            msgs_by_agent: list[tuple[str, dict]] = []
+            for name in agent_map:
+                try:
+                    msg = await self.bus.receive(name, timeout=3)
+                    key = hashlib.md5(
+                        (msg.get("content", "") + msg.get("from_agent", "")).encode()
+                    ).hexdigest()
+                    if key not in seen:
+                        seen.add(key)
+                        msgs_by_agent.append((name, msg))
+                except asyncio.TimeoutError:
+                    continue
+
+            if not msgs_by_agent:
+                quiet_rounds += 1
+                # Editor 已回答且连续多轮没人说话 → 真正结束
+                if final_answer and quiet_rounds >= 5:
+                    break
+                continue
+            quiet_rounds = 0
+
+            # 串行处理本轮消息——每个 Agent 自主决定 @谁，不等任何人
+            for name, msg in msgs_by_agent:
+                agent = agent_map[name]
+                prompt = self._build_negotiation_prompt(name, msg)
+                result = await agent.think_and_act(prompt)
+                response_text = result.get("response", "")
+                if result.get("tool_calls"):
+                    tool_calls_log.extend(result["tool_calls"])
+
+                if not response_text.strip() or response_text.strip().upper() == "PASS":
+                    continue
+
+                # Agent 自主决定发给谁
+                targets = self._parse_targets(response_text)
+                # Editor 给了长回答但没 @ 任何人 → 最终答案
+                if not targets and name == "editor" and len(response_text) > 50:
+                    final_answer = response_text
+                    await self.bus.send("editor", "user", "response",
+                        f"最终回答：{response_text[:300]}...", round_num=rounds)
+                    continue
+                # Librarian 给了检索结果但没 @ 任何人 → 默认发给 Editor
+                if not targets and name == "librarian":
+                    targets = ["editor"]
+
+                for target in targets:
+                    if target not in agent_map:
+                        continue
+                    await self.bus.send(name, target, "response", response_text, round_num=rounds)
+
+        return {
+            "final_answer": final_answer or "对话未完成",
+            "primary_agent": primary,
+            "tool_calls": tool_calls_log,
         }
     
     async def negotiate(self, task: str, max_rounds: int = 5) -> dict:
         """
-        真正的多 Agent 协商——每个 Agent 自主决定何时发言、对谁发言。
-        不是固定的 pipeline，是 Agent 通过 MessageBus 自由通信。
+        真正的多 Agent 自由协商——每个 Agent 并发运行，自主决定对谁发言。
+        加了三个控制：防重复、发言上限、最终回答收敛。
         """
-        # 注册所有 Agent
         for name in ["collector", "curator", "librarian", "editor"]:
             self.bus.register(name)
 
-        # 广播任务
-        await self.bus.broadcast(
-            from_agent="orchestrator",
-            msg_type="proposal",
-            content=task,
-            round_num=0,
-        )
+        final_answer = None
 
-        # 每个 Agent 的处理逻辑
-        agent_instances = {
-            "collector": self.collector,
-            "curator": self.curator,
-            "librarian": self.librarian,
-            "editor": self.editor,
-        }
+        async def agent_loop(name: str, agent, max_sends: int = 3):
+            nonlocal final_answer
+            seen_hashes = set()
+            send_count = 0
 
-        # 每个 Agent 独立运行：收消息 → 思考 → 发消息
-        async def agent_loop(name: str, agent):
             for _ in range(max_rounds):
                 try:
-                    msg = await self.bus.receive(name, timeout=10)
+                    msg = await self.bus.receive(name, timeout=8)
                 except asyncio.TimeoutError:
                     continue
 
-                # 收到消息 → 让 Agent 思考并决定下一步
+                # 防重复：同一内容不处理两次
+                content_hash = hashlib.md5(msg.get("content", "").encode()).hexdigest()
+                if content_hash in seen_hashes:
+                    continue
+                seen_hashes.add(content_hash)
+
+                # 发言上限：每个 Agent 最多发 3 次言
+                if send_count >= max_sends:
+                    continue
+
+                # 如果 Editor 已经给了最终回答，其他人别再发言
+                if final_answer and name != "editor":
+                    continue
+
                 prompt = self._build_negotiation_prompt(name, msg)
                 result = await agent.think_and_act(prompt)
-
                 response_text = result.get("response", "")
 
-                # Agent 自主决定给谁发消息
+                if response_text.strip().upper() == "PASS":
+                    continue
+
                 targets = self._parse_targets(response_text)
+                if not targets:
+                    continue
+
                 for target in targets:
+                    send_count += 1
                     await self.bus.send(
-                        from_agent=name,
-                        to_agent=target,
-                        msg_type="response",
-                        content=response_text,
+                        from_agent=name, to_agent=target,
+                        msg_type="response", content=response_text,
                         round_num=msg.get("round_num", 0) + 1,
                     )
 
-        # 四个 Agent 并发运行
+                # Editor 标记最终回答
+                if name == "editor" and "答案" in response_text or "回答" in response_text:
+                    final_answer = response_text
+
+        # 广播任务给相关 Agent
+        await self.bus.broadcast("orchestrator", "proposal",
+            f"任务：{task}\n@librarian 请检索相关内容\n@editor 请准备回答\n@curator 请记录主题",
+            round_num=0)
+
         await asyncio.gather(
-            agent_loop("curator", self.curator),
             agent_loop("librarian", self.librarian),
             agent_loop("editor", self.editor),
+            agent_loop("curator", self.curator),
             agent_loop("collector", self.collector),
         )
 
         return {
             "task": task,
+            "final_answer": final_answer or "未收到最终回答",
             "message_history": self.bus.get_history(),
-            "rounds": max_rounds,
         }
 
     def _parse_targets(self, response_text: str) -> list[str]:
-        """从 Agent 回复中提取目标 Agent 名（@agent名 格式）"""
         import re
         targets = re.findall(r'@(\w+)', response_text)
         valid = {"collector", "curator", "librarian", "editor", "all"}
-        return [t for t in targets if t in valid]
+        seen = set()
+        result = []
+        for t in targets:
+            if t in valid and t not in seen:
+                seen.add(t)
+                result.append(t)
+        return result
 
     def _build_negotiation_prompt(self, agent_name: str, msg: dict) -> str:
-        """构造协商时的 system prompt 补充，让 Agent 知道怎么参与协商"""
+        role_hints = {
+            "collector": "你的职责：收到URL或文章内容后，用 fetch_url 或 load_document 入库。如果 @curator 建议调整数据源，回复你的方案。",
+            "curator": "你的职责：收到文章后，用 check_similar 查重，用 record_topic 记录主题。如果重复或低质，告诉 @librarian 或 @collector。",
+            "librarian": "你的职责：用 search 检索。检索后告诉 @editor 结果质量和矛盾。存储压力大时告诉 @curator。",
+            "editor": "你的职责：综合检索结果回答用户。信息不足或矛盾时告诉 @librarian 补充。最终回答标注来源。",
+        }
+        hint = role_hints.get(agent_name, "")
         return f"""[协商消息]
-发送者: {msg['from_agent']}
-消息类型: {msg['msg_type']}
+发送者: {msg['from_agent']} | 类型: {msg['msg_type']}
 内容: {msg['content']}
 
-你是 {agent_name}。收到上述消息后：
-1. 如果你是相关方，给出你的专业判断
-2. 如果你需要其他 Agent 的信息，明确指出你要问谁、问什么。格式：@agent名 你的问题
-3. 如果消息与你无关，回复 "PASS"
-4. 如果你认为当前方案有问题，直接指出并给出修改建议"""
+你是 {agent_name}。{hint}
+收到上述消息后：用你的工具执行任务，如果需要协作用 @agent名 指定目标。与你无关则回复 PASS。"""
 
 
 

@@ -59,18 +59,16 @@ async def negotiate(request: Request):
 
     return {
         "task": result["task"],
-        "rounds": result["rounds"],
+        "final_answer": result["final_answer"],
         "message_history": result["message_history"],
     }
 
 
 @app.get("/negotiate/stream")
 async def negotiate_stream(request: Request):
-    """多 Agent 协商的 SSE 实时流——前端能看 Agent 怎么聊天的"""
-    task = request.query_params.get("task", "请检索并回答关于 agent memory 的问题")
+    """SSE 实时流——被动监听 Agent 之间的通信，配合 /chat 使用"""
 
     async def event_stream():
-        # 把消息推送到 SSE
         queue = asyncio.Queue()
 
         async def sse_listener(msg):
@@ -78,17 +76,13 @@ async def negotiate_stream(request: Request):
 
         orchestrator.bus.add_listener(sse_listener)
 
-        # 后台跑协商
-        asyncio.create_task(orchestrator.negotiate(task))
-
-        # 把每条消息转成 SSE 格式推给前端
+        # 一直保持连接，等待 /chat 端点触发 Agent 通信
         while True:
             try:
-                msg = await asyncio.wait_for(queue.get(), timeout=30)
+                msg = await asyncio.wait_for(queue.get(), timeout=60)
                 yield f"data: {json.dumps(msg, ensure_ascii=False)}\n\n"
             except asyncio.TimeoutError:
-                yield f"data: {json.dumps({'status': 'done'})}\n\n"
-                break
+                yield ": keepalive\n\n"
 
     return StreamingResponse(
         event_stream(),

@@ -82,21 +82,65 @@ class BaseAgent:
                     "content": f"工具 {tool_call['name']} 返回:\n{tool_result}",
                 })
             else:
+                # 如果之前执行过工具，让 LLM 基于工具结果生成自然语言回答
+                if tool_calls_made:
+                    self.conversation_history.append({"role": "assistant", "content": response})
+                    summary = await llm_chat(
+                        messages=self.conversation_history + [
+                            {"role": "user", "content": "请基于上述工具返回的结果，用自然语言给用户一个完整的回答。不要返回JSON，直接说话。"}
+                        ],
+                        provider=self.provider,
+                        model=self.model,
+                    )
+                    self.conversation_history.append({"role": "assistant", "content": summary})
+                    return {"response": summary, "tool_calls": tool_calls_made}
+
                 self.conversation_history.append({"role": "assistant", "content": response})
                 return {"response": response, "tool_calls": tool_calls_made}
 
+        # 超过最大轮数，也做一次自然语言总结
+        if tool_calls_made:
+            summary = await llm_chat(
+                messages=self.conversation_history + [
+                    {"role": "user", "content": "请用自然语言总结以上所有工具结果。"}
+                ],
+                provider=self.provider,
+                model=self.model,
+            )
+            self.conversation_history.append({"role": "assistant", "content": summary})
+            return {"response": summary, "tool_calls": tool_calls_made}
         return {"response": response, "tool_calls": tool_calls_made}
 
     def _parse_tool_call(self, response: str) -> dict | None:
         text = response.strip()
+        # 1. 优先从 ```json 代码块提取
         if "```json" in text:
             text = text.split("```json")[1].split("```")[0].strip()
         elif "```" in text:
             text = text.split("```")[1].split("```")[0].strip()
+        elif "{" in text:
+            # 2. 用栈匹配最外层的完整 JSON 对象（处理嵌套和混合文本）
+            start = text.find("{")
+            depth = 0
+            for i in range(start, len(text)):
+                if text[i] == "{":
+                    depth += 1
+                elif text[i] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        text = text[start:i+1]
+                        break
+
         try:
             parsed = json.loads(text)
-            if "tool" in parsed and "params" in parsed:
-                return {"name": parsed["tool"], "params": parsed["params"]}
+            if "tool" in parsed:
+                name = parsed["tool"]
+                if name not in self.tools:
+                    return None
+                params = parsed.get("params", {})
+                if not params:
+                    params = {k: v for k, v in parsed.items() if k != "tool"}
+                return {"name": name, "params": params}
         except json.JSONDecodeError:
             pass
         return None
