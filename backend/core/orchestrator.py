@@ -38,11 +38,6 @@ class Orchestrator:
             self.new_session("default")
 
         self.session.add_message("user", user_message)
-
-        # 每次新请求清空所有 Agent 的对话历史，防止上一轮内容污染
-        for agent in [self.collector, self.curator, self.librarian, self.editor]:
-            agent.conversation_history = []
-
         result = await self._run_concurrent_negotiation(user_message)
 
         response_text = result.get("final_answer", str(result))
