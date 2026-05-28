@@ -17,10 +17,10 @@ class Settings(BaseSettings):
 
     # ------- 模型路由：Agent → (provider, model) -------
     model_routing: dict = {
-        "collector": {"provider": "deepseek", "model": "deepseek-chat"},
-        "curator": {"provider": "deepseek", "model": "deepseek-chat"},
-        "librarian": {"provider": "deepseek", "model": "deepseek-chat"},
-        "editor": {"provider": "deepseek", "model": "deepseek-chat"},
+        "collector": {"provider": "deepseek", "model": "deepseek-v4-pro"},
+        "curator": {"provider": "deepseek", "model": "deepseek-v4-pro"},
+        "librarian": {"provider": "deepseek", "model": "deepseek-v4-pro"},
+        "editor": {"provider": "deepseek", "model": "deepseek-v4-pro"},
     }
 
     # ------- Embedding -------
