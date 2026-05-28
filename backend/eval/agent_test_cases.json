@@ -1,0 +1,47 @@
+[
+  {
+    "query": "Agent 记忆系统怎么设计衰减机制",
+    "type": "in_kb",
+    "expected_citations": true,
+    "expected_disclaimer": false,
+    "expected_conflict_flag": false,
+    "ground_truth_keywords": ["短期记忆", "长期记忆", "衰减", "30天", "90天", "艾宾浩斯"],
+    "expected_answer": "Agent记忆系统分为短期记忆和长期记忆。短期记忆用于当前会话，长期记忆存储跨会话的用户知识。衰减机制基于艾宾浩斯遗忘曲线：超过30天未巩固的记忆权重开始衰减，超过90天休眠但可唤醒。"
+  },
+  {
+    "query": "RRF 融合和 Prompt Caching 各自解决什么问题",
+    "type": "in_kb",
+    "expected_citations": true,
+    "expected_disclaimer": false,
+    "expected_conflict_flag": false,
+    "ground_truth_keywords": ["RRF", "融合", "排名", "Prompt Caching", "缓存", "成本"],
+    "expected_answer": "RRF融合解决多路检索结果如何公平合并排序的问题，不看分数看排名。Prompt Caching解决LLM调用中重复前缀的重复计算问题，通过缓存降低成本和延迟。"
+  },
+  {
+    "query": "React Server Components 怎么优化",
+    "type": "out_of_kb",
+    "expected_citations": false,
+    "expected_disclaimer": true,
+    "expected_conflict_flag": false,
+    "ground_truth_keywords": ["Server Components", "客户端", "服务端", "JS", "bundle"],
+    "expected_answer": "知识库暂无相关内容。以下基于模型自身知识：React Server Components优化包括合理划分Server/Client边界、利用Streaming和Suspense、减少客户端JS体积。"
+  },
+  {
+    "query": "比较一下文章A说的'Agent用单模型就够了'和文章B说的'必须多Agent协同'",
+    "type": "contradiction",
+    "expected_citations": true,
+    "expected_disclaimer": false,
+    "expected_conflict_flag": true,
+    "ground_truth_keywords": ["单Agent", "多Agent", "冲突", "观点不同", "单模型"],
+    "expected_answer": "来源A认为单Agent+好工具更优，来源B认为必须多Agent协同。两篇观点存在冲突：[⚠️来源A和来源B观点冲突]。实际上两种方案各有适用场景。"
+  },
+  {
+    "query": "Python 异步编程和 Agent 记忆衰减机制有什么共同点",
+    "type": "out_of_kb",
+    "expected_citations": false,
+    "expected_disclaimer": true,
+    "expected_conflict_flag": false,
+    "ground_truth_keywords": ["异步", "衰减", "不同领域", "无直接关联"],
+    "expected_answer": "这两个概念属于不同领域，无直接关联。Python异步编程是并发模型，Agent记忆衰减是知识管理策略。以下分别介绍..."
+  }
+]
