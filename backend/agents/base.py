@@ -100,7 +100,7 @@ class BaseAgent:
 
         # 超过最大轮数，也做一次自然语言总结
         if tool_calls_made:
-            summary = await llm_chat(
+            summary = await llm_chat_with_retry(
                 messages=self.conversation_history + [
                     {"role": "user", "content": "请用自然语言总结以上所有工具结果。"}
                 ],
