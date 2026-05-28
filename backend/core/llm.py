@@ -81,3 +81,18 @@ async def llm_chat(messages: list[dict], provider: str = "deepseek", model: str 
     raise ValueError(f"Unknown provider: {provider}")
 
 
+async def llm_chat_with_retry(messages: list[dict], provider: str = "deepseek", model: str = "deepseek-chat", max_retries: int = 3) -> str:
+    """带指数退避重试的 LLM 调用——第 1 层兜底"""
+    import asyncio as _asyncio
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            return await llm_chat(messages, provider, model)
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                wait = 2 ** attempt  # 1s → 2s → 4s
+                await _asyncio.sleep(wait)
+    raise last_error
+
+

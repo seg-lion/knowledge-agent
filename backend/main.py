@@ -39,7 +39,15 @@ async def chat(request: Request):
     body = await request.json()
     message = body.get("message", "")
 
-    result = await orchestrator.route_and_execute(message)
+    try:
+        result = await orchestrator.route_and_execute(message)
+    except Exception as e:
+        return {
+            "agent": "system",
+            "response": f"系统暂时不可用，请稍后重试。({str(e)[:100]})",
+            "tool_calls": [],
+            "session_id": "",
+        }
 
     return {
         "agent": result["agent"],

@@ -117,7 +117,12 @@ class Orchestrator:
             for name, msg in msgs_by_agent:
                 agent = agent_map[name]
                 prompt = self._build_negotiation_prompt(name, msg)
-                result = await agent.think_and_act(prompt)
+                try:
+                    result = await agent.think_and_act(prompt)
+                except Exception as e:
+                    await self.bus.send(name, "editor", "response",
+                        f"处理异常：{str(e)[:200]}", round_num=rounds)
+                    continue
                 response_text = result.get("response", "")
                 if result.get("tool_calls"):
                     tool_calls_log.extend(result["tool_calls"])

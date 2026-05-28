@@ -3,7 +3,7 @@
 '''
 import json
 import asyncio
-from core.llm import llm_chat
+from core.llm import llm_chat_with_retry
 from config import get_settings
 
 settings = get_settings()
@@ -62,7 +62,7 @@ class BaseAgent:
         max_turns = 3
 
         for _ in range(max_turns):
-            response = await llm_chat(
+            response = await llm_chat_with_retry(
                 messages=self.conversation_history,
                 provider=self.provider,
                 model=self.model,
@@ -85,7 +85,7 @@ class BaseAgent:
                 # 如果之前执行过工具，让 LLM 基于工具结果生成自然语言回答
                 if tool_calls_made:
                     self.conversation_history.append({"role": "assistant", "content": response})
-                    summary = await llm_chat(
+                    summary = await llm_chat_with_retry(
                         messages=self.conversation_history + [
                             {"role": "user", "content": "请基于上述工具返回的结果，用自然语言给用户一个完整的回答。不要返回JSON，直接说话。"}
                         ],
