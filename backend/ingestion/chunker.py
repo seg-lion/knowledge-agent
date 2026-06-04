@@ -17,13 +17,43 @@ def estimate_tokens(text:str) -> int:
     return chinese_chars + int(english_words * 1.3)
 
 
-def split_by_paragraphs(text:str) -> list[str]:
-    '''
-    按段落切分：空行或MarkDown标题作为分界
-    '''
-    # 在 Markdown 标题前和连续空行处切开
+def split_by_paragraphs(text: str) -> list[str]:
+    '''按段落切分：空行或MarkDown标题作为分界'''
     blocks = re.split(r'\n(?=#{1,6}\s)|\n{2,}', text)
     return [b.strip() for b in blocks if b.strip()]
+
+
+def split_long_paragraph(para: str, max_tokens: int) -> list[str]:
+    """
+    降级策略：段落超过 max_tokens 时，按句子边界递归切分。
+    切分优先级：句号/问号/感叹号 > 分号 > 逗号 > 空格
+    """
+    if estimate_tokens(para) <= max_tokens:
+        return [para]
+
+    # 找最佳切分点：在 para 中间附近找句子边界
+    mid = len(para) // 2
+    # 在中间附近往后找最近的句子结束符
+    match = re.search(r'[。！？!?\n]', para[mid:])
+    split_pos = mid + match.start() + 1 if match else None
+
+    # 没找到句子边界，退而求其次找分号或逗号
+    if split_pos is None or split_pos >= len(para) - 10:
+        match = re.search(r'[；;，,]', para[mid:])
+        split_pos = mid + match.start() + 1 if match else None
+
+    # 实在找不到切分点，在 max_tokens 对应的字符位置切
+    if split_pos is None:
+        split_pos = min(int(len(para) * 2 / 3), len(para) - 50)
+
+    left = para[:split_pos].strip()
+    right = para[split_pos:].strip()
+
+    if not left or not right:
+        return [para]
+
+    # 递归处理右边（可能仍然超长）
+    return [left] + split_long_paragraph(right, max_tokens)
 
 def chunk_text(text: str) -> list[dict]:
     '''
@@ -31,12 +61,16 @@ def chunk_text(text: str) -> list[dict]:
     确保每块在chunk_min ~ chunk_max token之间，且相邻块有 overlap
     
     '''
-    paragraphs = split_by_paragraphs(text)
+    # 先处理超长段落：每个段落如果超过 chunk_max_tokens，按句子边界切开
+    all_paragraphs = []
+    for p in split_by_paragraphs(text):
+        all_paragraphs.extend(split_long_paragraph(p, settings.chunk_max_tokens))
+
     chunks = []
     current_chunk = ""
     chunk_index = 0
 
-    for para in paragraphs:
+    for para in all_paragraphs:
         candidate = current_chunk + "\n" + para if current_chunk else para
 
         if estimate_tokens(candidate) <= settings.chunk_max_tokens:
@@ -56,12 +90,19 @@ def chunk_text(text: str) -> list[dict]:
                 if settings.chunk_overlap_ratio > 0:
                     text_len = len(current_chunk)
                     overlap_len = int(text_len * settings.chunk_overlap_ratio)
-                    # 直接用字符数取尾部——中英文都适用
                     current_chunk = current_chunk[-overlap_len:] + "\n" + para
                 else:
                     current_chunk = para
             else:
-                current_chunk = para # 处理第一个段落就超长的情况
+                # 降级后仍然超长（极少发生）→ 直接作为一个独立 chunk
+                chunks.append(
+                    {
+                        "content": para.strip(),
+                        "chunk_index": chunk_index,
+                    }
+                )
+                chunk_index += 1
+                current_chunk = ""
     
     # 最后一个 chunk
     '''
