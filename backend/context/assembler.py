@@ -5,9 +5,41 @@
 
 from memory.long_term import get_active_interests
 from memory.short_term import ShortTermMemory
+from ingestion.embedder import embed_text
 from config import get_settings
+import numpy as np
 
 settings = get_settings()
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """两个向量的余弦相似度（0~1）"""
+    a_arr, b_arr = np.array(a), np.array(b)
+    return float(np.dot(a_arr, b_arr) / (np.linalg.norm(a_arr) * np.linalg.norm(b_arr) + 1e-8))
+
+
+async def get_relevant_interests(query: str, top_k: int = 5) -> list[dict]:
+    """
+    选出跟当前 query 最相关的活跃兴趣。
+    综合得分 = confidence × 0.6 + query 相关度 × 0.4
+    """
+    all_interests = await get_active_interests()
+    qualified = [i for i in all_interests if i["confidence"] > 0.3]
+
+    if not qualified or not query.strip():
+        return qualified[:top_k]
+
+    query_emb = embed_text(query)
+    scored = []
+    for i in qualified:
+        topic_emb = embed_text(i["topic"])
+        relevance = _cosine_similarity(query_emb, topic_emb)
+        combined = i["confidence"] * 0.6 + relevance * 0.4
+        scored.append((combined, i))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [item for _, item in scored[:top_k]]
+
 
 async def assemble_context(
         agent_system_prompt: str,
@@ -21,17 +53,16 @@ async def assemble_context(
     保证 prefix cache 命中率最大
     '''
 
-    # 用户兴趣层：变化频率低，放前面
-    interests = await get_active_interests()
-    qualified = [i for i in interests if i['confidence'] > 0.3] # 选出大于0.3的
+    # 用户兴趣层：按 query 相关度 + 置信度综合排序
+    interests = await get_relevant_interests(user_query)
 
-    if qualified:
+    if interests:
         interest_text = "## 用户长期兴趣\n"
-        for i in qualified[:5]:
+        for i in interests:
             interest_text += f"-{i["topic"]} (置信度： {i['confidence']:.2f})\n"
     else:
         interest_text = "## 用户长期兴趣\n暂无记录\n"
-    
+
     # 会话摘要层：每N轮可能变
     session_text = f"## 当前会话上下文\n{session.get_recent_context()}"
 
@@ -44,7 +75,7 @@ async def assemble_context(
 
     messages = [{"role": "system", "content": full_system}]
 
-    # 工具层（变化少，放在 system message之后） 这是干嘛用的，一般工具不是agent收到query之后，Thought之后按照Action再来看工具的吗
+    # 工具层（变化少，放在 system message之后）
     if tools_description:
         messages.append(
             {
@@ -52,7 +83,7 @@ async def assemble_context(
                 "content": f"## 可用工具\n {tools_description}",
             }
         )
-    
+
     # 检索结果层：每次query不同
     if retrieved_docs:
         docs_text = "## 检索结果\n"
@@ -74,4 +105,3 @@ async def assemble_context(
     )
 
     return messages
-
